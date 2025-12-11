@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exponential Progress Bar</title>
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        .container {
+            background: var(--card);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 800px;
+        }
+
+        h2 { margin-top: 0; }
+
+        /* Controls Section */
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+            background: #f1f5f9;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        input[type=range] {
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .val-display {
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        button#startBtn {
+            grid-column: span 2;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button#startBtn:hover {
+            background-color: #2563eb;
+        }
+
+        /* Plot Section */
+        canvas {
+            width: 100%;
+            height: 300px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            background: #fff;
+        }
+
+        /* Progress Bar Section */
+        .progress-wrapper {
+            margin-top: 10px;
+        }
+        
+        .bar-bg {
+            background-color: #e2e8f0;
+            height: 30px;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background-color: var(--primary);
+            width: 0%;
+            transition: width 0.1s linear; /* Smooths the JS updates slightly */
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        .bar-text {
+            padding-right: 10px;
+            color: white;
+            font-size: 0.85rem;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 0.9rem;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Exponential Progress Simulator</h2>
+    <p style="font-size: 0.9em; color: #666;">
+        Formula: P(t) = 100 * (1 - e<sup>-kt</sup>). The curve is calculated so it passes exactly through T1 and P1.
+    </p>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Target Time (t1): <span id="t1Val" class="val-display">20</span>s</label>
+            <input type="range" id="t1" min="1" max="100" value="20" step="1">
+        </div>
+        <div class="control-group">
+            <label>Target Percentage (p1): <span id="p1Val" class="val-display">50</span>%</label>
+            <input type="range" id="p1" min="1" max="99" value="50" step="1">
+        </div>
+        <button id="startBtn">Start Animation</button>
+    </div>
+
+    <canvas id="plotCanvas"></canvas>
+
+    <div class="progress-wrapper">
+        <div class="bar-bg">
+            <div class="bar-fill" id="progressBar">
+                <span class="bar-text" id="barText">0%</span>
+            </div>
+        </div>
+        <div class="stats">
+            <span>Time: <span id="curTime">0.00</span>s</span>
+            <span>Target Point: (<span id="targetDisplay">20s, 50%</span>)</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Configuration ---
+    const canvas = document.getElementById('plotCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const t1Input = document.getElementById('t1');
+    const p1Input = document.getElementById('p1');
+    const startBtn = document.getElementById('startBtn');
+    
+    const t1Display = document.getElementById('t1Val');
+    const p1Display = document.getElementById('p1Val');
+    const targetDisplay = document.getElementById('targetDisplay');
+    
+    const progressBar = document.getElementById('progressBar');
+    const barText = document.getElementById('barText');
+    const curTimeDisplay = document.getElementById('curTime');
+
+    // Animation State
+    let animationId = null;
+    let startTime = 0;
+    let isRunning = false;
+    
+    // Graph limits
+    const X_MAX_TIME = 100; // Plot up to 100 seconds
+    const Y_MAX_PCT = 100;
+
+    // --- Logic ---
+
+    // 1. Calculate K based on inputs
+    function getK(t1, p1) {
+        // P(t) = 100 * (1 - e^(-kt))
+        // p1 = 100 * (1 - e^(-k*t1))
+        // p1/100 = 1 - e^(-k*t1)
+        // e^(-k*t1) = 1 - (p1/100)
+        // -k*t1 = ln(1 - p1/100)
+        // k = -ln(1 - p1/100) / t1
+        
+        // Safety check to avoid division by zero or log of negative/zero
+        let safeP = Math.min(p1, 99.99); 
+        let safeT = Math.max(t1, 0.1);
+        
+        return -Math.log(1 - (safeP / 100)) / safeT;
+    }
+
+    function calculateProgress(t, k) {
+        return 100 * (1 - Math.exp(-k * t));
+    }
+
+    // 2. Drawing the Chart
+    function drawChart(currentT = null, currentP = null) {
+        // Set canvas resolution for sharpness
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        
+        const w = rect.width;
+        const h = rect.height;
+        const padding = 40;
+
+        // Helper to map coordinates
+        const mapX = (t) => padding + (t / X_MAX_TIME) * (w - 2 * padding);
+        const mapY = (p) => h - padding - (p / Y_MAX_PCT) * (h - 2 * padding);
+
+        // Clear
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw Grid & Axes
+        ctx.beginPath();
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        
+        // Grid lines
+        for(let i=0; i<=10; i++) {
+            // Vertical
+            let x = mapX(i * 10);
+            ctx.moveTo(x, padding);
+            ctx.lineTo(x, h - padding);
+            // Horizontal
+            let y = mapY(i * 10);
+            ctx.moveTo(padding, y);
+            ctx.lineTo(w - padding, y);
+        }
+        ctx.stroke();
+
+        // Draw Axes Labels
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        // X Axis
+        for(let i=0; i<=10; i+=2) {
+            ctx.fillText((i*10) + 's', mapX(i*10), h - padding + 15);
+        }
+        // Y Axis
+        ctx.textAlign = 'right';
+        for(let i=0; i<=10; i+=2) {
+            ctx.fillText((i*10) + '%', padding - 10, mapY(i*10) + 3);
+        }
+
+        // --- Draw The Curve ---
+        const t1 = parseFloat(t1Input.value);
+        const p1 = parseFloat(p1Input.value);
+        const k = getK(t1, p1);
+
+        ctx.beginPath();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 3;
+        
+        ctx.moveTo(mapX(0), mapY(0));
+        for(let t=0; t<=X_MAX_TIME; t+=0.5) {
+            let p = calculateProgress(t, k);
+            ctx.lineTo(mapX(t), mapY(p));
+        }
+        ctx.stroke();
+
+        // --- Draw Input Point Marker ---
+        ctx.beginPath();
+        ctx.fillStyle = '#ef4444'; // Red dot for target
+        ctx.arc(mapX(t1), mapY(p1), 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // --- Draw Live Progress Marker ---
+        if (currentT !== null && currentP !== null) {
+            ctx.beginPath();
+            ctx.fillStyle = '#3b82f6'; // Blue dot for current state
+            ctx.arc(mapX(currentT), mapY(currentP), 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+            ctx.fillRect(padding, mapY(currentP), mapX(currentT) - padding, h - padding - mapY(currentP));
+        }
+    }
+
+    // 3. Animation Loop
+    function step() {
+        if (!isRunning) return;
+
+        const now = Date.now();
+        const elapsed = (now - startTime) / 1000; // in seconds
+
+        const t1 = parseFloat(t1Input.value);
+        const p1 = parseFloat(p1Input.value);
+        const k = getK(t1, p1);
+
+        const currentP = calculateProgress(elapsed, k);
+
+        // Update UI
+        progressBar.style.width = `${Math.min(currentP, 100)}%`;
+        barText.innerText = `${currentP.toFixed(1)}%`;
+        curTimeDisplay.innerText = elapsed.toFixed(2);
+
+        // Update Plot with current position
+        drawChart(elapsed, currentP);
+
+        // Stop if we effectively hit 100% (or 99.99)
+        if (currentP < 99.99) {
+            animationId = requestAnimationFrame(step);
+        } else {
+            isRunning = false;
+            progressBar.style.width = `100%`;
+            barText.innerText = `100%`;
+        }
+    }
+
+    function start() {
+        if (animationId) cancelAnimationFrame(animationId);
+        
+        const t1 = parseFloat(t1Input.value);
+        const p1 = parseFloat(p1Input.value);
+        
+        // Reset
+        startTime = Date.now();
+        isRunning = true;
+        
+        step();
+    }
+
+    function updateInputs() {
+        t1Display.innerText = t1Input.value;
+        p1Display.innerText = p1Input.value;
+        targetDisplay.innerText = `${t1Input.value}s, ${p1Input.value}%`;
+        
+        // Redraw static chart to show new curve
+        drawChart();
+        
+        // If not running, reset bar
+        if (!isRunning) {
+            progressBar.style.width = '0%';
+            barText.innerText = '0%';
+            curTimeDisplay.innerText = '0.00';
+        }
+    }
+
+    // --- Listeners ---
+    t1Input.addEventListener('input', updateInputs);
+    p1Input.addEventListener('input', updateInputs);
+    startBtn.addEventListener('click', start);
+
+    // Initial Draw
+    updateInputs();
+
+</script>
+
+</body>
+</html>
